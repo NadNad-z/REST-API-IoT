@@ -53,7 +53,7 @@
         "type": "function",
         "z": "flow_api",
         "name": "Simpan Data Sensor",
-        "func": "// Simpan data terakhir ke flow context\nvar data = msg.payload;\ndata.received = new Date().toISOString();\nflow.set('lastSensor', data);\n\n// Simpan history (maks 50 data)\nvar history = flow.get('history') || [];\nhistory.push(data);\nif (history.length > 50) history.shift();\nflow.set('history', history);\n\nreturn msg;",
+        "func": "// Simpan data terakhir ke flow context\nvar data = msg.payload;\ndata.received = new Date().toISOString();\n\n// Bandingkan dengan batas suhu (default 30 kalau belum pernah diatur)\nvar batas = flow.get('batas');\nif (batas === undefined) batas = 30;\ndata.batas = batas;\ndata.melewati_batas = data.suhu > batas;\n\n// Notifikasi di sisi Node-RED (muncul di panel debug)\nif (data.melewati_batas) {\n    node.warn('PERINGATAN: suhu ' + data.suhu + ' °C melewati batas ' + batas + ' °C');\n}\n\nflow.set('lastSensor', data);\n\n// Simpan history (maks 50 data)\nvar history = flow.get('history') || [];\nhistory.push(data);\nif (history.length > 50) history.shift();\nflow.set('history', history);\n\nreturn msg;",
         "outputs": 1,
         "timeout": 0,
         "noerr": 0,
@@ -396,6 +396,89 @@
         "headers": {},
         "x": 290,
         "y": 500,
+        "wires": []
+    },
+    {
+        "id": "e4d78b14528b3c32",
+        "type": "http in",
+        "z": "flow_api",
+        "name": "PUT /api/threshold",
+        "url": "/api/threshold",
+        "method": "put",
+        "upload": false,
+        "skipBodyParsing": false,
+        "swaggerDoc": "",
+        "x": 90,
+        "y": 640,
+        "wires": [
+            [
+                "7e64328af26e897e"
+            ]
+        ]
+    },
+    {
+        "id": "7e64328af26e897e",
+        "type": "function",
+        "z": "flow_api",
+        "name": "Cek API Key",
+        "func": "const API_KEY = 'iot-kampus-2026';\nconst key = msg.req.headers['x-api-key'];\n\nif (key !== API_KEY) {\n    msg.statusCode = 401;\n    msg.payload = { status: 'error', message: 'API key tidak valid' };\n    msg.headers = { 'Access-Control-Allow-Origin': '*' };\n    return [null, msg];   // keluar lewat output 2 (ditolak)\n}\nreturn [msg, null];       // keluar lewat output 1 (boleh masuk)",
+        "outputs": 2,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 290,
+        "y": 640,
+        "wires": [
+            [
+                "54e3a4ab1b0063b5"
+            ],
+            [
+                "ab342100b825f6d7"
+            ]
+        ]
+    },
+    {
+        "id": "54e3a4ab1b0063b5",
+        "type": "function",
+        "z": "flow_api",
+        "name": "Simpan Threshold",
+        "func": "const raw = msg.payload && msg.payload.batas;\nconst batas = (raw === undefined || raw === null || raw === '') ? NaN : Number(raw);\n\nmsg.headers = { 'Access-Control-Allow-Origin': '*' };\n\nif (!isFinite(batas)) {\n    msg.statusCode = 400;\n    msg.payload = { status: 'error', message: 'batas harus berupa angka' };\n    return msg;\n}\n\nflow.set('batas', batas);\nmsg.statusCode = 200;\nmsg.payload = { status: 'success', message: 'Batas suhu disimpan', batas: batas };\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 490,
+        "y": 640,
+        "wires": [
+            [
+                "28316f180cadcef0"
+            ]
+        ]
+    },
+    {
+        "id": "28316f180cadcef0",
+        "type": "http response",
+        "z": "flow_api",
+        "name": "",
+        "statusCode": "",
+        "headers": {},
+        "x": 670,
+        "y": 640,
+        "wires": []
+    },
+    {
+        "id": "ab342100b825f6d7",
+        "type": "http response",
+        "z": "flow_api",
+        "name": "",
+        "statusCode": "",
+        "headers": {},
+        "x": 290,
+        "y": 700,
         "wires": []
     }
 ]
