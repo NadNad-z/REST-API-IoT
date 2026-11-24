@@ -64,7 +64,8 @@
         "y": 100,
         "wires": [
             [
-                "debug_sensor"
+                "debug_sensor",
+                "fn_ws_format"
             ],
             [
                 "db_insert"
@@ -598,5 +599,42 @@
                 "resp_history"
             ]
         ]
+    },
+    {
+        "id": "ws_listener",
+        "type": "websocket-listener",
+        "path": "/ws/sensor",
+        "wholemsg": "false"
+    },
+    {
+        "id": "fn_ws_format",
+        "type": "function",
+        "z": "flow_api",
+        "name": "Format WebSocket",
+        "func": "// Bungkus data sensor supaya dashboard tahu jenis pesannya\nmsg.payload = { type: 'sensor', data: msg.payload };\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 640,
+        "y": 60,
+        "wires": [
+            [
+                "ws_out"
+            ]
+        ]
+    },
+    {
+        "id": "ws_out",
+        "type": "websocket out",
+        "z": "flow_api",
+        "name": "WebSocket Sensor",
+        "server": "ws_listener",
+        "client": "",
+        "x": 850,
+        "y": 60,
+        "wires": []
     }
 ]
