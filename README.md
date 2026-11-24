@@ -57,4 +57,5 @@ simulasi_esp32.py --MQTT--> Mosquitto --> Node-RED --> SQLite (iot.db)
 ## Tampilan
 ![Dashboard]("<img width="640" height="303" alt="tampilan" src="https://github.com/user-attachments/assets/8342b64a-dd91-4e96-80c5-0596961600fd" />
 ")
-![Flow Node-RED](screenshots/flow.png)
+![Flow Node-RED](<img width="460" height="279" alt="flow" src="https://github.com/user-attachments/assets/0d0b3e49-3d28-48d5-aa08-b5cb36f09a1d" />
+)
