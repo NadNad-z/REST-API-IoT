@@ -55,5 +55,6 @@ simulasi_esp32.py --MQTT--> Mosquitto --> Node-RED --> SQLite (iot.db)
 - API Key (`iot-kampus-2026`) hanya untuk keperluan simulasi. Pada sistem sebenarnya, key tidak boleh ditaruh di sisi client, melainkan disimpan di server atau memakai autentikasi login/token.
 
 ## Tampilan
-![Dashboard]("C:\iot-rest-api\tampilan.png")
+![Dashboard]("<img width="640" height="303" alt="tampilan" src="https://github.com/user-attachments/assets/8342b64a-dd91-4e96-80c5-0596961600fd" />
+")
 ![Flow Node-RED](screenshots/flow.png)
