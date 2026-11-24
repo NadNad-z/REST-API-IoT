@@ -67,6 +67,9 @@
   </div>
 
   <div class="panel">
+  <h2>📈 Grafik Suhu & Kelembaban</h2>
+  <canvas id="grafik" height="110"></canvas>
+</div>
     <h2>📋 10 Data Sensor Terakhir</h2>
     <table>
       <thead><tr><th>Waktu</th><th>Suhu (°C)</th><th>Kelembaban (%)</th></tr></thead>
@@ -81,11 +84,12 @@
     <div id="log"></div>
   </div>
 </div>
-
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 <script>
 // Jika dibuka lewat http://localhost:1880/dashboard.html -> pakai '/api'
 // Jika dibuka langsung dari file (file://) -> pakai alamat lengkap
 const API_BASE = location.protocol === 'file:' ? 'http://localhost:1880/api' : '/api';
+const API_KEY = 'iot-kampus-2026';
 
 function log(msg, type = 'info') {
   const el = document.getElementById('log');
@@ -102,7 +106,7 @@ function setBadge(online) {
 
 async function fetchSensor() {
   try {
-    const res = await fetch(`${API_BASE}/suhu`);
+    const res = await fetch(`${API_BASE}/suhu`, { headers: { 'X-API-Key': API_KEY } });
     const json = await res.json();
     if (json.status === 'success' && json.data.suhu !== null) {
       document.getElementById('suhu').textContent = json.data.suhu;
@@ -119,10 +123,31 @@ async function fetchSensor() {
   }
 }
 
+const grafik = new Chart(document.getElementById('grafik'), {
+  type: 'line',
+  data: {
+    labels: [],
+    datasets: [
+      { label: 'Suhu (°C)', data: [], borderColor: '#e74c3c', tension: 0.3 },
+      { label: 'Kelembaban (%)', data: [], borderColor: '#3498db', tension: 0.3 }
+    ]
+  },
+  options: { animation: false, responsive: true }
+});
+
+function updateChart(data) {
+  const d = data.slice(-20);
+  grafik.data.labels = d.map(x => new Date(x.received).toLocaleTimeString());
+  grafik.data.datasets[0].data = d.map(x => x.suhu);
+  grafik.data.datasets[1].data = d.map(x => x.kelembaban);
+  grafik.update();
+}
+
 async function fetchHistory() {
   try {
-    const res = await fetch(`${API_BASE}/history`);
+    const res = await fetch(`${API_BASE}/history`, { headers: { 'X-API-Key': API_KEY } });
     const json = await res.json();
+    if (json.data) updateChart(json.data);
     const tbody = document.getElementById('history-body');
     if (!json.data || json.data.length === 0) {
       tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:#999;">Belum ada data</td></tr>';
@@ -143,7 +168,7 @@ async function kontrol(device, action) {
   try {
     const res = await fetch(`${API_BASE}/kontrol`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'X-API-Key': API_KEY },
       body: JSON.stringify({ device, action })
     });
     const json = await res.json();
@@ -161,7 +186,7 @@ log('Dashboard dimulai, polling setiap 3 detik...');
 fetchSensor();
 fetchHistory();
 setInterval(fetchSensor, 3000);
-setInterval(fetchHistory, 5000);
+setInterval(fetchHistory, 3000);
 </script>
 </body>
 </html>
