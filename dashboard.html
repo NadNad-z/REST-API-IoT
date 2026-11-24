@@ -6,7 +6,7 @@
   <title>IoT Dashboard - REST API</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Segoe UI', sans-serif; }
-    body { background: linear-gradient(135deg, #667eea, #764ba2); min-height: 100vh; padding: 20px; color: #333; }
+    body { background: linear-gradient(135deg, #9baeff, #9688c9); min-height: 100vh; padding: 20px; color: #333; }
     .container { max-width: 1000px; margin: 0 auto; }
     h1 { color: white; text-align: center; margin-bottom: 25px; font-size: 28px; }
     .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; margin-bottom: 25px; }
@@ -37,8 +37,9 @@
 </head>
 <body>
 <div class="container">
-  <h1>🌡️ IoT Dashboard — REST API</h1>
-
+  <h1>🌡️ IoT Dashboard — REST API + WebSocket</h1>
+  <div id="mode-info" style="text-align:center; color:#e8e8ff; margin:-15px 0 20px; font-size:14px;">Mode: menghubungkan...</div>
+  <div id="alert-box" style="display:none; background:#dc3545; color:white; padding:15px 20px; border-radius:12px; margin-bottom:20px; font-weight:600; text-align:center;"></div>
   <div class="cards">
     <div class="card">
       <div class="label">Suhu</div>
@@ -57,7 +58,15 @@
       </div>
     </div>
   </div>
-
+  <div class="panel">
+  <h2>🌡️ Batas Suhu (Threshold)</h2>
+  <div class="controls">
+    <input type="number" id="input-batas" step="0.1" placeholder="Contoh: 30"
+           style="padding:12px; border:1px solid #ccc; border-radius:10px; font-size:15px; width:160px;">
+    <button class="btn btn-on" onclick="setBatas()">Simpan Batas</button>
+    <span id="info-batas" style="align-self:center; color:#666;">Batas saat ini: --</span>
+  </div>
+</div>
   <div class="panel">
     <h2>💡 Kontrol Perangkat</h2>
     <div class="controls">
@@ -66,18 +75,20 @@
     </div>
   </div>
 
-  <div class="panel">
+ <div class="panel">
   <h2>📈 Grafik Suhu & Kelembaban</h2>
   <canvas id="grafik" height="110"></canvas>
 </div>
-    <h2>📋 10 Data Sensor Terakhir</h2>
-    <table>
-      <thead><tr><th>Waktu</th><th>Suhu (°C)</th><th>Kelembaban (%)</th></tr></thead>
-      <tbody id="history-body">
-        <tr><td colspan="3" style="text-align:center;color:#999;">Loading...</td></tr>
-      </tbody>
-    </table>
-  </div>
+
+<div class="panel">
+  <h2>📋 10 Data Sensor Terakhir</h2>
+  <table>
+    <thead><tr><th>Waktu</th><th>Suhu (°C)</th><th>Kelembaban (%)</th></tr></thead>
+    <tbody id="history-body">
+      <tr><td colspan="3" style="text-align:center;color:#999;">Loading...</td></tr>
+    </tbody>
+  </table>
+</div>
 
   <div class="panel">
     <h2>📝 Log Aktivitas</h2>
@@ -86,10 +97,18 @@
 </div>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
 <script>
-// Jika dibuka lewat http://localhost:1880/dashboard.html -> pakai '/api'
+// Jika dibuka lewat http://localhost:1880/dashboard.html -> pakai '/api' dan host yang sama
 // Jika dibuka langsung dari file (file://) -> pakai alamat lengkap
 const API_BASE = location.protocol === 'file:' ? 'http://localhost:1880/api' : '/api';
+const WS_URL = location.protocol === 'file:'
+  ? 'ws://localhost:1880/ws/sensor'
+  : (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws/sensor';
 const API_KEY = 'iot-kampus-2026';
+
+let sedangAlert = false;
+let wsAktif = false;        // true selama WebSocket tersambung
+let riwayat = [];           // history lokal (maks 50 data)
+let terakhirMasuk = null;   // waktu data sensor terakhir (ms)
 
 function log(msg, type = 'info') {
   const el = document.getElementById('log');
@@ -104,25 +123,37 @@ function setBadge(online) {
   badge.className = 'status-badge ' + (online ? 'status-online' : 'status-offline');
 }
 
-async function fetchSensor() {
-  try {
-    const res = await fetch(`${API_BASE}/suhu`, { headers: { 'X-API-Key': API_KEY } });
-    const json = await res.json();
-    if (json.status === 'success' && json.data.suhu !== null) {
-      document.getElementById('suhu').textContent = json.data.suhu;
-      document.getElementById('kelembaban').textContent = json.data.kelembaban;
-      // ONLINE jika data terakhir masuk < 10 detik yang lalu
-      const umur = Date.now() - new Date(json.data.received).getTime();
-      setBadge(umur < 10000);
-    } else {
-      setBadge(false);
+function setMode(teks) {
+  document.getElementById('mode-info').textContent = 'Mode: ' + teks;
+}
+
+// ==============================
+// TAMPILKAN DATA SENSOR (dipakai WebSocket maupun polling)
+// ==============================
+function tampilkanSensor(d) {
+  document.getElementById('suhu').textContent = d.suhu;
+  document.getElementById('kelembaban').textContent = d.kelembaban;
+  terakhirMasuk = new Date(d.received).getTime();
+  setBadge(Date.now() - terakhirMasuk < 10000);
+
+  document.getElementById('info-batas').textContent = 'Batas saat ini: ' + d.batas + ' °C';
+  const box = document.getElementById('alert-box');
+  if (d.melewati_batas) {
+    box.style.display = 'block';
+    box.textContent = `⚠️ PERINGATAN: Suhu ${d.suhu} °C melewati batas ${d.batas} °C!`;
+    if (!sedangAlert) {
+      log(`⚠️ Suhu ${d.suhu} °C melewati batas ${d.batas} °C`, 'error');
+      sedangAlert = true;
     }
-  } catch (err) {
-    setBadge(false);
-    log(`Gagal fetch sensor: ${err.message}`, 'error');
+  } else {
+    box.style.display = 'none';
+    sedangAlert = false;
   }
 }
 
+// ==============================
+// GRAFIK + TABEL (dirender dari array riwayat)
+// ==============================
 const grafik = new Chart(document.getElementById('grafik'), {
   type: 'line',
   data: {
@@ -135,32 +166,132 @@ const grafik = new Chart(document.getElementById('grafik'), {
   options: { animation: false, responsive: true }
 });
 
-function updateChart(data) {
-  const d = data.slice(-20);
-  grafik.data.labels = d.map(x => new Date(x.received).toLocaleTimeString());
-  grafik.data.datasets[0].data = d.map(x => x.suhu);
-  grafik.data.datasets[1].data = d.map(x => x.kelembaban);
+function renderRiwayat() {
+  const d20 = riwayat.slice(-20);
+  grafik.data.labels = d20.map(x => new Date(x.received).toLocaleTimeString());
+  grafik.data.datasets[0].data = d20.map(x => x.suhu);
+  grafik.data.datasets[1].data = d20.map(x => x.kelembaban);
   grafik.update();
+
+  const tbody = document.getElementById('history-body');
+  if (riwayat.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:#999;">Belum ada data</td></tr>';
+    return;
+  }
+  tbody.innerHTML = riwayat.slice(-10).reverse().map(d => `
+    <tr>
+      <td>${new Date(d.received).toLocaleTimeString()}</td>
+      <td>${d.suhu}</td>
+      <td>${d.kelembaban}</td>
+    </tr>`).join('');
+}
+
+// ==============================
+// REST: dipakai sekali di awal, dan sebagai cadangan kalau WebSocket putus
+// ==============================
+async function fetchSensor() {
+  try {
+    const res = await fetch(`${API_BASE}/suhu`, { headers: { 'X-API-Key': API_KEY } });
+    const json = await res.json();
+    if (json.status === 'success' && json.data.suhu !== null) {
+      tampilkanSensor(json.data);
+    } else {
+      setBadge(false);
+    }
+  } catch (err) {
+    setBadge(false);
+    log(`Gagal fetch sensor: ${err.message}`, 'error');
+  }
 }
 
 async function fetchHistory() {
   try {
     const res = await fetch(`${API_BASE}/history`, { headers: { 'X-API-Key': API_KEY } });
     const json = await res.json();
-    if (json.data) updateChart(json.data);
-    const tbody = document.getElementById('history-body');
-    if (!json.data || json.data.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:#999;">Belum ada data</td></tr>';
-      return;
-    }
-    tbody.innerHTML = json.data.slice(-10).reverse().map(d => `
-      <tr>
-        <td>${new Date(d.received).toLocaleTimeString()}</td>
-        <td>${d.suhu}</td>
-        <td>${d.kelembaban}</td>
-      </tr>`).join('');
+    riwayat = json.data || [];
+    renderRiwayat();
   } catch (err) {
     log(`Gagal fetch history: ${err.message}`, 'error');
+  }
+}
+
+// ==============================
+// WEBSOCKET: update tanpa polling
+// ==============================
+let socketAktif = null;     // referensi socket yang sedang dipakai
+let terakhirPesanWS = 0;    // waktu pesan WebSocket terakhir (ms)
+
+function sambungWebSocket() {
+  let ws;
+  try {
+    ws = new WebSocket(WS_URL);
+  } catch (err) {
+    log(`✗ WebSocket gagal dibuat: ${err.message}`, 'error');
+    setTimeout(sambungWebSocket, 3000);
+    return;
+  }
+  socketAktif = ws;
+
+  ws.onopen = () => {
+    wsAktif = true;
+    terakhirPesanWS = Date.now();
+    setMode('WebSocket (real-time, tanpa polling)');
+    log('✓ WebSocket tersambung', 'info');
+    fetchSensor();    // sinkronkan sekali
+    fetchHistory();
+  };
+
+  ws.onmessage = (event) => {
+    terakhirPesanWS = Date.now();
+    try {
+      const pesan = JSON.parse(event.data);
+      if (pesan.type === 'sensor' && pesan.data) {
+        tampilkanSensor(pesan.data);
+        riwayat.push(pesan.data);
+        if (riwayat.length > 50) riwayat.shift();
+        renderRiwayat();
+      }
+    } catch (err) {
+      log(`✗ Pesan WebSocket tidak valid: ${err.message}`, 'error');
+    }
+  };
+
+  ws.onclose = (e) => {
+    if (ws !== socketAktif) return;      // abaikan socket lama
+    if (wsAktif) log(`WebSocket terputus (kode ${e.code}), beralih ke polling dan mencoba tersambung lagi...`, 'error');
+    wsAktif = false;
+    setMode('Polling REST (WebSocket terputus)');
+    setTimeout(sambungWebSocket, 3000);
+  };
+
+  ws.onerror = () => { ws.close(); };
+}
+
+// Watchdog: kalau WebSocket "tersambung" tapi tidak ada data > 8 detik, sambungkan ulang
+setInterval(() => {
+  if (wsAktif && socketAktif && Date.now() - terakhirPesanWS > 8000) {
+    log('⚠️ WebSocket diam > 8 detik, menyambung ulang...', 'error');
+    socketAktif.close();
+  }
+}, 2000);
+
+// ==============================
+// AKSI: threshold dan kontrol (tetap lewat REST)
+// ==============================
+async function setBatas() {
+  const nilai = parseFloat(document.getElementById('input-batas').value);
+  if (isNaN(nilai)) { log('✗ Batas harus berupa angka', 'error'); return; }
+  try {
+    const res = await fetch(`${API_BASE}/threshold`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-API-Key': API_KEY },
+      body: JSON.stringify({ batas: nilai })
+    });
+    const json = await res.json();
+    if (json.status === 'success') log(`✓ Batas suhu diubah ke ${json.batas} °C`, 'info');
+    else log(`✗ Gagal: ${json.message}`, 'error');
+  } catch (err) {
+    log(`✗ Error threshold: ${err.message}`, 'error');
   }
 }
 
@@ -182,11 +313,23 @@ async function kontrol(device, action) {
   }
 }
 
-log('Dashboard dimulai, polling setiap 3 detik...');
+// ==============================
+// MULAI
+// ==============================
+log('Dashboard dimulai, menghubungkan WebSocket...');
 fetchSensor();
 fetchHistory();
-setInterval(fetchSensor, 3000);
-setInterval(fetchHistory, 3000);
+sambungWebSocket();
+
+// Cadangan: polling hanya berjalan selama WebSocket TIDAK tersambung
+setInterval(() => {
+  if (!wsAktif) { fetchSensor(); fetchHistory(); }
+}, 3000);
+
+// Badge menjadi OFFLINE kalau tidak ada data baru > 10 detik
+setInterval(() => {
+  if (terakhirMasuk !== null) setBadge(Date.now() - terakhirMasuk < 10000);
+}, 2000);
 </script>
 </body>
 </html>
